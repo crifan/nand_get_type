@@ -1,0 +1,40 @@
+<?xml version='1.0' encoding="utf-8"?>
+
+<!DOCTYPE chapter
+[
+<!ENTITY % crl_ent PUBLIC "crl.ent" 'http://www.crifan.com/files/res/docbook/entity/crl.ent'>
+%crl_ent;
+]>
+
+<chapter xmlns="http://docbook.org/ns/docbook"
+    xml:id="ch01_some_jargon"
+    xmlns:xi="http://www.w3.org/2001/XInclude">
+
+<title>看此文之前，一些有必要先解释的术语</title>
+<abstract>下面是Linux MTD中，获取nand flash型号,各个参数，以及硬件特性的函数，其实也就是<function>nand_get_flash_type</function>，下面对其详细解析：</abstract>
+
+<sect1 xml:id="program"><title>Program(编程)</title>
+    <para>此处的编程，不是写软件，写代码，而是对于硬件来说的，可以理解为对硬件编程，只不过其工具是硬件内部的逻辑，而不是你用的软件。对Nand Flash的编程，本质上就是实现写操作，将数据写到Nand Flash里面去，所以对于nand flash，可以简单的理解为 program编程＝write写（数据）。</para>
+</sect1>
+
+<sect1><title>Datasheet(数据手册)</title>
+    <para>这个词，本来没啥好说的，接触多了，自然就知道了。但是对于和我类似，最开始接触的时候，就是没搞懂这个词的具体含义。其中文翻译，一般称作，数据手册，意思就是，一个关于描述硬件各个硬件特性，参数以及/或者如何操作，如何使用的文档。</para>
+</sect1>
+
+<sect1><title>Erasesize / Writesize</title>
+    <para>这个是Linux MTD中，关于块大小和页大小的别名，第一次见到的时候，把我搞糊涂了，后来才慢慢明白的。因为，nand 操作的写基本单位页，所以，writesize，对应的就是pagesize，页大小。而擦除操作的基本单位是blocksize，块大小，所以也叫它erasesize。在此简单提一下这几个名词，方便和我遇到类似问题的朋友。</para>
+</sect1>
+
+<sect1><title>Spare Area / Redundant Area / OOB</title>
+    <para>nand flash中每一页对应一块区域，用于存放校验的ECC数据和其他一些信息，比如上层文件系统放的和自己文件系统相关的数据。这个区域，在Linux MTD相关系统中，被称作oob（out of band），可以翻译为带外，也就是nand flash的一个页，可以称作一个band，band之外，对应的就是指那个多出来的，特殊的区域了。而nand flash的datasheet中，一般成为spare area，可译为空闲区域，另外，在ID的含义解释中也叫做redundant area，可译为冗余区域，归根结底，都是一个含义。不要被搞糊涂了就好。 </para>
+</sect1>
+
+<sect1><title>Page Register(页寄存器)</title>
+    <para>nand flash硬件中的一块地方，名字叫做register，实际就是一个数据缓存，一个buffer，用于存放那些从flash读出来或者将要写入到flash中的。其实叫做页缓存，更合适，更容易明白其含义。此页寄存器的大小＝页大小+ oob 大小，即pagesize+oob，对于常见的页是2KB的，此页寄存器就是2KB+64=2112字节。</para>    
+</sect1>
+
+<sect1><title>Chip和Plane</title>
+    <para>对于chip，其实任何某个型号的flash，都可以称其是一个chip，但是实际上，此处的chip，是针对内部来说的，也就是某型号的flash，内部有几个chip，比如下面会举例说到的，三星的2GB的K9WAG08U1A芯片（可以理解为外部芯片/型号）内部装了2个单片是1GB的K9K8G08U0A，此时就称 K9WAG08U1A内部有2个chip，而有些单个的chip，内部又包含多个plane，比如上面的K9K8G08U0A内部包含4个单片是2Gb的Plane。只有搞清楚了此处的chip和plane的关系，才能明白后面提到的多页（Multi Plane / Multi Page）编程和交互（interleave）编程的含义。</para>    
+</sect1>
+
+</chapter>

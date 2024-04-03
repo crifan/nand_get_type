@@ -1,0 +1,568 @@
+<?xml version='1.0' encoding="utf-8"?>
+
+<!DOCTYPE chapter
+[
+<!ENTITY % crl_ent PUBLIC "crl.ent" 'http://www.crifan.com/files/res/docbook/entity/crl.ent'>
+%crl_ent;
+]>
+
+<chapter xmlns="http://docbook.org/ns/docbook"
+    xml:id="ch02_code_explanation"
+    xmlns:xi="http://www.w3.org/2001/XInclude">
+
+<title>代码详细解析</title>
+<abstract>详细代码可以在这里找到：<filename>linux/drivers/mtd/nand/nand_base.c</filename></abstract>
+
+<sect1 xml:id="parse_function"><title>解析函数<function>nand_get_flash_type</function></title>
+    <programlistingco>
+        <programlisting language="c">
+2407/*
+2408 * Get the flash and manufacturer id and lookup if the type is supported
+2409 */
+2410static struct nand_flash_dev *nand_get_flash_type(struct mtd_info *mtd,
+2411                                                  struct nand_chip *chip,
+2412                                                  int busw, int *maf_id)
+2413{
+2414        struct nand_flash_dev *type = NULL;
+2415        int i, dev_id, maf_idx;
+2416        int tmp_id, tmp_manf;
+2417
+2418        /* Select the device */
+2419        chip-&gt;select_chip(mtd, 0);<co id="co.select_chip" linkends="co.note.select_chip" />
+2420
+2421        /*
+2422         * Reset the chip, required by some chips (e.g. Micron MT29FxGxxxxx)
+2423         * after power-up
+2424         */
+2425        chip-&gt;cmdfunc(mtd, NAND_CMD_RESET, -1, -1);
+2426
+2427        /* Send the command for reading device ID */
+2428        chip-&gt;cmdfunc(mtd, NAND_CMD_READID<co id="co.cmd_readid" linkends="co.note.cmd_readid" />, 0x00, -1);
+2429
+2430        /* Read manufacturer and device IDs */<co id="co.maf_dev_id" linkends="co.note.maf_dev_id" />
+2431        *maf_id = chip-&gt;read_byte(mtd);
+2432        dev_id = chip-&gt;read_byte(mtd);
+2433
+2434        /* Try again to make sure, as some systems the bus-hold or other
+2435         * interface concerns can cause random data which looks like a
+2436         * possibly credible NAND flash to appear. If the two results do
+2437         * not match, ignore the device completely.
+2438         */
+2439
+2440        chip-&gt;cmdfunc(mtd, NAND_CMD_READID<co id="co.cmd_readid_2" linkends="co.note.cmd_readid_2" />, 0x00, -1);
+2441
+2442        /* Read manufacturer and device IDs */
+2443
+2444        tmp_manf = chip-&gt;read_byte(mtd);
+2445        tmp_id = chip-&gt;read_byte(mtd);
+2446
+2447        if (tmp_manf != *maf_id || tmp_id != dev_id) {
+2448                printk(KERN_INFO "%s: second ID read did not match "
+2449                       "%02x,%02x against %02x,%02x\n", __func__,
+2450                       *maf_id, dev_id, tmp_manf, tmp_id);
+2451                return ERR_PTR(-ENODEV);
+2452        }
+2453
+2454        /* Lookup the flash id */
+2455        for (i = 0; nand_flash_ids<co id="co.nand_flash_ids" linkends="co.note.nand_flash_ids" />[i].name != NULL; i++) {
+2456                if (dev_id == nand_flash_ids[i].id) {<co id="co.nand_id_cmp" linkends="co.note.nand_id_cmp" />
+2457                        type =  &amp;nand_flash_ids[i];
+2458                        break;
+2459                }
+2460        }
+2461
+2462        if (!type)
+2463                return ERR_PTR(-ENODEV);
+2464
+2465        if (!mtd-&gt;name)
+2466                mtd-&gt;name = type-&gt;name;
+2467
+2468        chip-&gt;chipsize = (uint64_t)type-&gt;chipsize &lt;&lt; 20<co id="co.left_shift_20" linkends="co.note.left_shift_20" />;
+2469
+2470        /* Newer devices have all the information in additional id bytes */
+2471        if (!type-&gt;pagesize) {
+2472                int extid;
+2473                /* The 3rd id byte holds MLC / multichip data */
+2474                chip-&gt;cellinfo<co id="co.3rd_byte" linkends="co.note.3rd_byte" /> = chip-&gt;read_byte(mtd);
+2475                /* The 4th id byte is the important one */<co id="co.4th_byte" linkends="co.note.4th_byte" />
+2476                extid = chip-&gt;read_byte(mtd);
+2477                /* Calc pagesize */<co id="co.calc_pagesize" linkends="co.note.calc_pagesize" />
+2478                mtd-&gt;writesize = 1024 &lt;&lt; (extid &amp; 0x3);
+2479                extid &gt;&gt;= 2;
+2480                /* Calc oobsize */<co id="co.calc_oobsize" linkends="co.note.calc_oobsize" />
+2481                mtd-&gt;oobsize = (8 &lt;&lt; (extid &amp; 0x01)) * (mtd-&gt;writesize &gt;&gt; 9);
+2482                extid &gt;&gt;= 2;
+2483                /* Calc blocksize. Blocksize is multiples of 64KiB */<co id="co.calc_blocksize" linkends="co.note.calc_blocksize" />
+2484                mtd-&gt;erasesize = (64 * 1024) &lt;&lt; (extid &amp; 0x03);
+2485                extid &gt;&gt;= 2;
+2486                /* Get buswidth information */
+2487                busw = (extid &amp; 0x01) ? NAND_BUSWIDTH_16<co id="co.x8_x16" linkends="co.note.x8_x16" /> : 0;
+2488
+2489        } else {
+2490                /*
+2491                 * Old devices have chip data hardcoded in the device id table <co id="co.old_nand" linkends="co.note.old_nand" />
+2492                 */
+2493                mtd-&gt;erasesize = type-&gt;erasesize;
+2494                mtd-&gt;writesize = type-&gt;pagesize;
+2495                mtd-&gt;oobsize = mtd-&gt;writesize / 32;
+2496                busw = type-&gt;options &amp; NAND_BUSWIDTH_16;
+2497        }
+2498
+2499        /* Try to identify manufacturer */<co id="co.check_maf" linkends="co.note.check_maf" />
+2500        for (maf_idx = 0; nand_manuf_ids[maf_idx].id != 0x0; maf_idx++) {
+2501                if (nand_manuf_ids[maf_idx].id == *maf_id)
+2502                        break;
+2503        }
+2504
+2505        /*
+2506         * Check, if buswidth is correct. Hardware drivers should set<co id="co.check_buswidth" linkends="co.note.check_buswidth" />
+2507         * chip correct !
+2508         */
+2509        if (busw != (chip-&gt;options &amp; NAND_BUSWIDTH_16)) {
+2510                printk(KERN_INFO "NAND device: Manufacturer ID:"
+2511                       " 0x%02x, Chip ID: 0x%02x (%s %s)\n", *maf_id,
+2512                       dev_id, nand_manuf_ids[maf_idx].name, mtd-&gt;name);
+2513                printk(KERN_WARNING "NAND bus width %d instead %d bit\n",
+2514                       (chip-&gt;options &amp; NAND_BUSWIDTH_16) ? 16 : 8,
+2515                       busw ? 16 : 8);
+2516                return ERR_PTR(-EINVAL);
+2517        }
+2518
+2519        /* Calculate the address shift from the page size */
+2520        chip-&gt;page_shift<co id="co.page_shift" linkends="co.note.page_shift" /> = ffs(mtd-&gt;writesize) - 1;
+2521        /* Convert chipsize to number of pages per chip -1. */
+2522        chip-&gt;pagemask<co id="co.pagemask" linkends="co.note.pagemask" /> = (chip-&gt;chipsize &gt;&gt; chip-&gt;page_shift) - 1;
+2523
+2524        chip-&gt;bbt_erase_shift = chip-&gt;phys_erase_shift =
+2525                ffs(mtd-&gt;erasesize) - 1;
+2526        if (chip-&gt;chipsize &amp; 0xffffffff)
+2527                chip-&gt;chip_shift = <co id="co.ffs" linkends="co.note.ffs" />ffs((unsigned)chip-&gt;chipsize) - 1;
+2528        else
+2529                chip-&gt;chip_shift = ffs((unsigned)(chip-&gt;chipsize &gt;&gt; 32)) + 32 - 1;
+2530
+2531        /* Set the bad block position */<co id="co.set_bad_pos" linkends="co.note.set_bad_pos" />
+2532        chip-&gt;badblockpos = mtd-&gt;writesize &gt; 512 ?
+2533                NAND_LARGE_BADBLOCK_POS : NAND_SMALL_BADBLOCK_POS;
+2534
+2535        /* Get chip options, preserve non chip based options */<co id="co.get_options" linkends="co.note.get_options" />
+2536        chip-&gt;options &amp;= ~NAND_CHIPOPTIONS_MSK;
+2537        chip-&gt;options |= type-&gt;options &amp; NAND_CHIPOPTIONS_MSK;
+2538
+2539        /*
+2540         * Set chip as a default. Board drivers can override it, if necessary
+2541         */
+2542        chip-&gt;options |= NAND_NO_AUTOINCR;<co id="co.no_auto_inc" linkends="co.note.no_auto_inc" />
+2543
+2544        /* Check if chip is a not a samsung device. Do not clear the
+2545         * options for chips which are not having an extended id.
+2546         */
+2547        if (*maf_id != NAND_MFR_SAMSUNG &amp;&amp; !type-&gt;pagesize)
+2548                chip-&gt;options &amp;= ~NAND_SAMSUNG_LP_OPTIONS;<co id="co.clea_lp_options" linkends="co.note.clea_lp_options" />
+2549
+2550        /* Check for AND chips with 4 page planes */
+2551        if (chip-&gt;options &amp; NAND_4PAGE_ARRAY)<co id="co.and_chip" linkends="co.note.and_chip" />
+2552                chip-&gt;erase_cmd = multi_erase_cmd;
+2553        else
+2554                chip-&gt;erase_cmd = single_erase_cmd;
+2555
+2556        /* Do not replace user supplied command function ! */
+2557        if (mtd-&gt;writesize &gt; 512 &amp;&amp; chip-&gt;cmdfunc == nand_command)
+2558                chip-&gt;cmdfunc = nand_command_lp;<co id="co.largepage" linkends="co.note.largepage" />
+2559
+2560        printk<co id="co.printk" linkends="co.note.printk" />(KERN_INFO "NAND device: Manufacturer ID:"
+2561               " 0x%02x, Chip ID: 0x%02x (%s %s)\n", *maf_id, dev_id,
+2562               nand_manuf_ids[maf_idx].name, type-&gt;name);
+2563
+2564        return type;<co id="co.return" linkends="co.note.return" />
+2565}
+        </programlisting>
+        <calloutlist>
+            <callout id="co.note.select_chip" arearefs="co.select_chip" >
+                <para>选中芯片，才能对其操作。</para>
+            </callout>
+            
+            <callout id="co.note.cmd_readid" arearefs="co.cmd_readid" >
+                <para>发送ReadID的命令：0x90，去取得芯片的ID信息</para>
+            </callout>
+            
+            <callout id="co.note.maf_dev_id" arearefs="co.maf_dev_id" >
+                <para>根据datasheet中的定义，第一个字节，简称byte1，是生产厂商的信息，不同的厂商，对应不同的数字。而byte2是芯片类型，不同的nand flash芯片，对应不同的设备ID，也就是一个字节的数字。</para>
+                <para>关于读取出来的ID的具体含义，可以参考三星K9K8G08U0A的datasheet中解释：</para>
+                <figure><title>Nand Flash读取出来的各个ID的含义</title>
+                    <mediaobject>
+                        <imageobject role="html">
+                            <imagedata fileref="images/nand_id_bytes.png" align="left" scalefit="0" width="100%" />
+                        </imageobject>
+                        <imageobject role="fo">
+                            <imagedata fileref="images/nand_id_bytes.png" align="center" scalefit="1" width="100%"/>
+                        </imageobject>
+                    </mediaobject>
+                </figure>
+            </callout>
+            
+            <callout id="co.note.cmd_readid_2" arearefs="co.cmd_readid_2" >
+                <para>再次发送ReadID命令，其目的，上面注释代码中说了，有些特殊的系统中，第一次读取的信息，看起来是很正常，但是实际是错的，所以这里读两次，正常的设备，肯定都会一样的，如果两次不一样，那么说明设备有问题，也就直接函数返回了。</para>
+            </callout>
+            
+            <callout id="co.note.nand_flash_ids" arearefs="co.nand_flash_ids" >
+                <para>下面根据读取出来的flash ID，也就是具体flash芯片，或叫做设备ID，不同的数值，对应不同的容量和物理参数的flash。</para>
+                <para>其中，nand_flash_ids是个预先定义好的数组，其定义在：<filename>drivers\mtd\nand\nand_ids.c</filename>中，此处简要摘录如下：</para>
+                <programlistingco>
+                    <programlisting language="c">
+/*
+*	Chip ID list
+*
+*	Name. ID code, pagesize, chipsize in MegaByte, eraseblock size, options
+*
+*	Pagesize; 0, 256, 512
+*	0	get this information from the extended chip ID
++	256	256 Byte page size
+*	512	512 Byte page size
+*/
+struct nand_flash_dev<co id="co.nand_flash_dev" linkends="co.note.nand_flash_dev" /> nand_flash_ids[] = {
+......
+    /* 4 Gigabit */
+    {"NAND 512MiB 1,8V 8-bit",	0xAC, 0, 512, 0, LP_OPTIONS},
+    {"NAND 512MiB 3,3V 8-bit",	0xDC, 0, 512, 0, LP_OPTIONS},
+    {"NAND 512MiB 1,8V 16-bit",	0xBC, 0, 512, 0, LP_OPTIONS16},
+    {"NAND 512MiB 3,3V 16-bit",	0xCC, 0, 512, 0, LP_OPTIONS16},
+
+    /* 8 Gigabit */
+    {"NAND 1GiB 1,8V 8-bit",	0xA3, 0, 1024, 0, LP_OPTIONS},
+    {"NAND 1GiB 3,3V 8-bit",	0xD3, 0, 1024, 0, LP_OPTIONS},
+    {"NAND 1GiB 1,8V 16-bit",	0xB3, 0, 1024, 0, LP_OPTIONS16},
+    {"NAND 1GiB 3,3V 16-bit",	0xC3, 0, 1024, 0, LP_OPTIONS16},
+......
+}
+                    </programlisting>
+                    <calloutlist>
+                        <callout id="co.note.nand_flash_dev" arearefs="co.nand_flash_dev" >
+                            <para>而结构体nand_flash_dev的定义如下：<filename>include\linux\mtd\nand.h</filename></para>
+                            <programlisting language="c">
+/**
+ * struct nand_flash_dev - NAND Flash Device ID Structure
+ * @name:	Identify the device type
+ * @id:		device ID code
+ * @pagesize:	Pagesize in bytes. Either 256 or 512 or 0
+ *		If the pagesize is 0, then the real pagesize
+ *		and the eraseize are determined from the
+ *		extended id bytes in the chip
+ * @erasesize:	Size of an erase block in the flash device.
+ * @chipsize:	Total chipsize in Mega Bytes
+ * @options:	Bitfield to store chip relevant options
+ */
+struct nand_flash_dev {
+    char *name;
+    int id;
+    unsigned long pagesize;
+    unsigned long chipsize;
+    unsigned long erasesize;
+    unsigned long options;
+};
+                            </programlisting>
+                        </callout>
+                    </calloutlist>
+                </programlistingco>
+                <para>在结构体数组nand_flash_ids[]中，预先定义了，目前所支持的很多类型Nand Flash的具体物理参数，主要是上面结构体中的页大小pagesize，芯片大小chipsize，块大小erasesize，而id变量表示此类型的芯片，用哪个数字来表示。</para>
+            </callout>
+            
+            <callout id="co.note.nand_id_cmp" arearefs="co.nand_id_cmp" >
+                <para>此处通过刚读取到的设备ID，去和预先定义好的那个结构体数组nand_flash_ids[]中的每一个ID去比较，如果相等，那么说明支持此款nand falsh，而其他的信息，就可以直接从后面几项中直接获得了。</para>
+                <note><title>当pagesize为0的时候</title>
+                    <para>如果pagesize是0，那么说明关于pagesize和其他一些信息，要通过读取额外的ID来获得，这也就是待会下面要详细解释的。</para>
+                </note>
+                <para>而对于旧的一些nand flash，在表项中其pagesize不是0，就可以直接可以从上面的预定义的表里面获得了。</para>
+                <para>比如，对于常见的三星的型号为K9K8G08U0A的nand flash，其设备号是0xD3，找到匹配的表项就是：</para>
+                <programlisting>{"NAND 1GiB 3,3V 8-bit",	0xD3, 0, 1024, 0, LP_OPTIONS},</programlisting>
+                <para>因此也就知道，其容量是1024MB，设备相关物理特性是1GiB 3,3V 8-bit了。</para>
+                <para>而关于pagesize和块大小erasesize此处都是0，就只能另外从后面读取的ID中获得了。</para>
+            </callout>                
+            
+            <callout id="co.note.left_shift_20" arearefs="co.left_shift_20" >
+                <para>此处由于上面表中的chipsize是MB＝2<superscript>10</superscript>Bytes为单位的，所以要左移20位，换算成byte单位</para>
+            </callout>
+            
+            <callout id="co.note.3rd_byte" arearefs="co.3rd_byte" >
+                <para>解释下面代码第三个字节之前，要先把图标帖出来，才更容易看得懂具体的解释：</para>
+                <figure><title>Nand Flash 第三个ID的具体含义</title>
+                    <mediaobject>
+                        <imageobject role="html">
+                            <imagedata fileref="images/nand_id_3rd.png" align="left" scalefit="0" width="100%" />
+                        </imageobject>
+                        <imageobject role="fo">
+                            <imagedata fileref="images/nand_id_3rd.png" align="center" scalefit="1" width="100%"/>
+                        </imageobject>
+                    </mediaobject>
+                </figure>
+                <para>由表中定义可以看出：
+                    <orderedlist>
+                        <listitem>Internal Chip Number
+                            <para>意思是，内部芯片有几颗。</para>
+                            <para>有些型号的Nand Flash，为了实现更高的容量，在芯片内部封装了多个芯片。</para>
+                            <para>比如三星的K9WAG08U1A容量是2GB，内部是装了2个单片是1GB的K9K8G08U0A，对应地，里面要包含2个片选CE1和CE2（均是低电平有效），而4GB的K9NBG08U5A包含了4片的K9K8G08U0A。</para>
+                        </listitem>
+                        
+                        <listitem>Cell Type：SLC / MLC
+                            <para>bit2&amp;bit3表示的是芯片的类型，是SLC还是某种MLC：
+                                <itemizedlist mark='opencircle'>
+                                    <listitem>Bit2,bit3=0x00 ： SLC，简单说就是内部单个存储单元，存储一位的数据，所能表示的数值只有0，1，也就需要两种不同的电压来表示，所以叫做2 Level的Cell。</listitem>
+                                    <listitem override='bullet'>Bit2,bit3=0x01/0x10/0x11 ： 4 /8/16 Level Cell，都叫做MLC，其含义是内部单个存储单元设计成可以表示多个，即4/8/16个不同的电压，对应地，可以表示2，3，4位的数据。
+                                        <para>这类的MLC的nand flash，由于单个存储单元，要存储更多的数据，所以内部结构更复杂，读取和写入数据的逻辑更复杂，相对数据出错的几率也比SLC要大。</para>
+                                        <para>所以，一般MLC的使用，都需要检错和纠错能力更强的硬件或软件算法，以保证数据的正确性。</para>
+                                        <para>软件实现此类的多位数据的检错和纠错的效率相对较低，一般是硬件本身就已经提供此功能。</para>
+                                        <para>对应的其为硬件ECC，也就是Linux内核MTD中的HW_ECC。</para>
+                                        <para>其他关于SLC/MLC的更详细解释，感兴趣的可以去看另一个帖子：<ulink url="http://www.crifan.com/files/doc/docbook/linux_nand_driver/release/html/linux_nand_driver.html">【详解】如何编写Linux下Nand Flash驱动</ulink></para>
+                                    </listitem>
+                                </itemizedlist>
+                            </para>
+                        </listitem>
+                        
+                        <listitem>Number of Simultaneously Programmed Pages
+                            <para>可以对几个页同时编程/写。</para>
+                            <para>此功能简单的说就是，一次性地写多个页的数据到对应的不同的页。</para>
+                            <para>对应支持此操作的，硬件上必须要有多个plane，而每个plane，都有一个自己的页寄存器。</para>
+                            <para>比如K9K8G08U0A有4个plane，分别叫做，plane0，plane1，plane2，plane3。</para>
+                            <para>它们共分成2组，plane0和plane1，plane2和plane3。如图：</para>
+                            <figure><title>Nand Flash中多页编程对应的多个Plane的组织架构</title>
+                                <mediaobject>
+                                    <imageobject role="html">
+                                        <imagedata fileref="images/nand_multi_plane.png" align="left" scalefit="0" width="100%" />
+                                    </imageobject>
+                                    <imageobject role="fo">
+                                        <imagedata fileref="images/nand_multi_plane.png" align="center" scalefit="1" width="100%"/>
+                                    </imageobject>
+                                </mediaobject>
+                            </figure>
+                            <para>在多页编程时候，只能对某一组中的两个plane操作，不允许类似于plane0和plane2或plane3一起去做多页编程。</para>
+                            <para>以plane0和plane1为例，在实现具体的编程动作之前，将你要写入的2个页的数据，分别写入plane0和plane1中的页寄存器，然后才能发命令，去实现具体的编程操作。</para>
+                            <para>正是因为多页编程需要底层的多plane支持，底层实现的时候，是同时对多个plane编程，所以，也被叫做Multi Plane Program</para>
+                        </listitem>
+                        
+                        <listitem>Interleave Program Between Multiple chips
+                            <para>交错，从字面意思就可以看出，此操作涉及对象就不止一个。</para>
+                            <para>交错编程，就是对多个chip，交错地进行编程，先对一个编程，充分利用第一个编程过程中需要等待的时间，转去操作另一个，以此实现总体效率的提高。</para>
+                            <para>如果支持Interleave Program的话，那么前面的chip number必然大于1。</para>
+                        </listitem>
+                        
+                        <listitem>Cache Program
+                            <itemizedlist>
+                                <listitem>Cache读
+                                    <para>在开始了一次cache读之后，在你把数据读出去的这段时间，nand flash会自动地把下一页的数据读取出来放到页寄存器。</para>
+                                </listitem>
+                                <listitem>Cache写
+                                    <para>在你写入数据的时候，对应的内存中的数据，不是直接写到页寄存器中，而是到了cache buffer中</para>
+                                    <para>然后再发cache 写的命令，此时，数据才从cache buffer中，转递到页寄存器中，然后把数据一点点编程到nand flash</para>
+                                    <para>此时，你可以去利用页编程的时间，去准备下一次的数据，然后依此地写入下一个页。</para>
+                                </listitem>
+                            </itemizedlist>
+                            <para>Cache读或写，是充分利用了读一页数据出来，或者将一页数据写到flash里面去的时间，去准备新的一页的数据，这样就可以实现连续的读或写，大大提高读写效率。</para>
+                        </listitem>
+                    </orderedlist>
+                </para>
+            </callout>
+            
+            <callout id="co.note.4th_byte" arearefs="co.4th_byte" >
+                <para>读取4th ID</para>
+                <para>4th ID的含义，如图：</para>
+                <figure id="fg.nand_4th_id"><title>Nand Flash 第4个ID的具体含义</title>
+                    <mediaobject>
+                        <imageobject role="html">
+                            <imagedata fileref="images/nand_id_4th.png" align="left" scalefit="0" width="100%" />
+                        </imageobject>
+                        <imageobject role="fo">
+                            <imagedata fileref="images/nand_id_4th.png" align="center" scalefit="1" width="100%"/>
+                        </imageobject>
+                    </mediaobject>
+                </figure>
+            </callout>
+            
+            <callout id="co.note.calc_pagesize" arearefs="co.calc_pagesize" >
+                <para>Page Size，如<xref linkend="fg.nand_4th_id" />所示，页大小，是bit0和bit1组合起来所表示的。</para>
+                <para>extid &amp; 0x3，就是取得bit0和bit1的值，而左移1024位，是因为上面表中的单位是KB＝2<superscript>10</superscript>=1024。</para>
+                <tip><title>此处关于1024 &lt;&lt; (extid &amp; 0x3)的含义</title>
+                    <para>我之前也是看了很长时间，都没看懂，后来才看懂具体的意思的。</para>
+                    <para>1024 &lt;&lt; (extid &amp; 0x3) 其实就是</para>
+                    <para>= 1024 × (1&lt;&lt; (extid &amp; 0x3))</para>
+                    <para>= 前面的1024</para>
+                    <para>= 之前的单位：KB</para>
+                    <para>而后面的写法，即2的extid &amp; 0x3的次方，比如，如果extid &amp; 0x3是3，那么，1&lt;&lt; (extid &amp; 0x3)就是1&lt;&lt;3＝8，对应的上面的8KB。</para>
+                </tip>
+            </callout>
+            
+            <callout id="co.note.calc_oobsize" arearefs="co.calc_oobsize" >
+                <para>Redundant Area Size(byte/512byte)</para>
+                <para>前面介绍过了，此处的oob，就是datasheet中的redundant area size就是linux中的oob大小。</para>
+                <para>上面表中的意思是，512个byte，对应8还是16个字节的redundant area。</para>
+                <para>之所以是512字节对应多少个，是因为以前的nand flash页大小是512（除了最早的好像是256之外），所以估计是硬件设计就这样设计了。512个字节对应多少个冗余的数据用作oob，而后来的页大小，对应的是512的整数倍，比如2K，4K等</para>
+                <para>所以，此处可以按照每个512对应几个字节的oob，然后再算页大小是512的多少倍，即：</para>
+                <para>此处的extid &amp; 0x01算出来的值，对应上面的8或16，而mtd-&gt;writesize &gt;&gt; 9，其实就是</para>
+                <para>mtd-&gt;writesize /512，到此，才算清楚，为何此处oob是这么算的。</para>
+            </callout>
+            
+            <callout id="co.note.calc_blocksize" arearefs="co.calc_blocksize" >
+                <para>Block Size</para>
+                <para>具体算法很清楚，算出是64KB的多少倍，得出总大小。</para>
+                <para>此处之所以是64KB为基础，是因为已知最小的blocksize，就是64KB的。</para>
+            </callout>
+            
+            <callout id="co.note.x8_x16" arearefs="co.x8_x16" >
+                <para>Organization</para>
+                <para>X8/X16，表示的是，硬件I/O位宽（Bus Width）是8位的还是16位的。</para>
+                <para>目前大多数，都是X8的。</para>
+            </callout>
+            
+            <callout id="co.note.old_nand" arearefs="co.old_nand" >
+                <para>旧的nand flash的一些参数，是知道设备ID后，可以直接从表中读取出来的。</para>
+            </callout>
+
+            <callout id="co.note.check_maf" arearefs="co.check_maf" >
+                <para>根据读取出来的生长厂商的ID，去和表中对应项匹配，找到是哪家的nand flash芯片。</para>
+                <para>其中，nand_manuf_ids和上面nand_flash_ids类似，也是个预先定义好的数组，其定义和nand_flash_ids同文件<filename>drivers\mtd\nand\nand_ids.c</filename>中：</para>
+                <programlistingco>
+                    <programlisting language="c">
+/*
+*	Manufacturer ID list
+*/
+struct nand_manufacturers nand_manuf_ids[] = {
+	{NAND_MFR_TOSHIBA, "Toshiba"},
+	{NAND_MFR_SAMSUNG<co id="co.mfr_samsung" linkends="co.note.mfr_samsung" />, "Samsung"},
+	{NAND_MFR_FUJITSU, "Fujitsu"},
+	{NAND_MFR_NATIONAL, "National"},
+	{NAND_MFR_RENESAS, "Renesas"},
+	{NAND_MFR_STMICRO, "ST Micro"},
+	{NAND_MFR_HYNIX, "Hynix"},
+	{NAND_MFR_MICRON, "Micron"},
+	{NAND_MFR_AMD, "AMD"},
+	{0x0, "Unknown"}
+};
+                    </programlisting>
+                    <calloutlist>
+                        <callout id="co.note.mfr_samsung" arearefs="co.mfr_samsung" >
+                            <para>对应的各个厂家的宏和结构体的定义是在：<filename>include\linux\mtd\nand.h</filename>中：</para>
+                            <programlistingco>
+                                <programlisting language="c">
+/*
+ * NAND Flash Manufacturer ID Codes
+ */
+#define NAND_MFR_TOSHIBA	0x98
+#define NAND_MFR_SAMSUNG	0xec<co id="co.mfr_samsung_id" linkends="co.note.mfr_samsung_id" />
+#define NAND_MFR_FUJITSU	0x04
+#define NAND_MFR_NATIONAL	0x8f
+#define NAND_MFR_RENESAS	0x07
+#define NAND_MFR_STMICRO	0x20
+#define NAND_MFR_HYNIX		0xad
+#define NAND_MFR_MICRON		0x2c
+#define NAND_MFR_AMD		0x01
+
+/**
+ * struct nand_manufacturers - NAND Flash Manufacturer ID Structure
+ * @name:	Manufacturer name
+ * @id:		manufacturer ID code of device.
+*/
+struct nand_manufacturers {
+	int id;
+	char * name;
+};
+                                </programlisting>
+                                <calloutlist>
+                                    <callout id="co.note.mfr_samsung_id" arearefs="co.mfr_samsung_id" >
+                                        <para>我们最常读到的生产厂家的id：0xEC，就是对应这里的Samsung，表示此款nand flash是三星家的。</para>
+                                    </callout>
+                                </calloutlist>
+                            </programlistingco>
+                        </callout>
+                    </calloutlist>
+                </programlistingco>
+            </callout>
+
+            <callout id="co.note.check_buswidth" arearefs="co.check_buswidth" >
+                <para>检测你的驱动中的关于位宽的定义，是否和硬件所一致。</para>
+            </callout>
+            
+            <callout id="co.note.page_shift" arearefs="co.page_shift" >
+                <para>此处计算的pagesize，blocksize等的shift，是为了后期的对这些值的除操作更加高效而做的。</para>
+                <para>对于代码中的除操作，如果直接只是/pagesize，则没有直接算出其是2的多少次方，然后用位移操作，更加高效。因此，此处直接计算好是多少个shift，以后的除于pagesize，blocksize，就可以直接用对应的位移操作了。</para>
+            </callout>
+            
+            <callout id="co.note.pagemask" arearefs="co.pagemask" >
+                <para>算出mask，为了后期保证传入的地址不越界，所以会对其mask一下。</para>
+            </callout>
+            
+            <callout id="co.note.ffs" arearefs="co.ffs" >
+                <para>这段，貌似是新的kernel里面新加的，而且把chip->chipsize定义换成uint64_t了，支持超过4GB大小的nand flash了</para>
+                <para>否则，如果你正好是4GB，对于旧的代码chip->chipsize是uint32_t类型的，那么正好就变成0了。</para>
+                <para>此处之所以去chip->chipsize &amp; 0xffffffff判断是超过4GB，看起来，估计是ffs函数最多支持32位，所以，没法计算超过此大小的ffs。</para>
+                <tip><title>ffs简介</title>
+                    <para>简单说一下，ffs是计算一个数值的第一个被置位的位置，全称好像是 find first set bit</para>
+                    <para>其简单解释如下：</para>
+                    <para>
+                        <para><function>ffs</function></para>
+                        <para>查找第一个已设置的位</para>
+                        <para>函数原型：int ffs (int x)</para>
+                        <para>x为要搜索的字</para>
+                    </para>
+                    <para>刚百度了一下，好像还有个对应的函数：ffz，找到第一个0的位置，估计就是find first zero bit了。呵呵。</para>
+                    <para>而且，这些，好像是Linux提供的基本函数库里面的，自己之前都没怎么听说过呢。汗一个先。。。</para>
+                </tip>
+            </callout>
+            
+            <callout id="co.note.set_bad_pos" arearefs="co.set_bad_pos" >
+                <para>设置坏块的标记位置。</para>
+                <para>关于nand flash的small block和large block，据我了解，好像就是对应的small pagesize和large pagesize，而此处的大小，是针对于旧的nand flash，其页大小pagesize是512</para>
+                <para>所以，Small block就是页大小是512B的nand flash，而larger block就是新的，页大小大于512B的，比如2KB，4KB等的nand flash。</para>
+                <para>下面的宏定义在<filename>include\linux\mtd\nand.h</filename>中：</para>
+                <programlisting>
+/*
+* Constants for oob configuration
+*/
+#define NAND_SMALL_BADBLOCK_POS		5
+#define NAND_LARGE_BADBLOCK_POS		0
+                </programlisting>
+                <para>约定俗成的，small block的nand ，坏块标记在byte5，而large block的nand flash在byte0。</para>
+                <para>关于坏块标记，实际情况更复杂些：</para>
+                <tip><title>Nand Flash坏块标记位置</title>
+                    <para>对于2K页的nand flash，标记位置都是页内oob开始处，都是非0xFF表示坏块，</para>
+                    <para>但是，对于是第几页，不同nand flash就有不同的规定了：</para>
+                    <para>有些nand flash，是标记在坏块的第一个页（或者是第二个页，这点是考虑到，万一第一个页是坏的，所以才做此规定的。一般都是在第一个页处做标记）</para>
+                    <para>比如三星的多数SLC，Hynix等</para>
+                    <para>另一些，是在一个块内的最后一页或倒数第二页做此标记，比如samsung MLC , Numonyx等。</para>
+                    <para>所以，真正比较完整的检查坏块的做法，至少要检测块内第一，第二，倒数第一，倒数第二页，是否是0xFF，才能比较全面的判断是否是坏块的。</para>
+                </tip>
+            </callout>
+            
+            <callout id="co.note.get_options" arearefs="co.get_options" >
+                <para>获得上面nand id表中的默认设置的那些option：LP_OPTIONS（如果是X16则是，LP_OPTIONS16）。</para>
+            </callout>
+            
+            <callout id="co.note.no_auto_inc" arearefs="co.no_auto_inc" >
+                <para>自动增加页数？？？ 没太搞懂啥意思，估计是cache program/read相关的吧，目前据我了解的，好像页只有cache program/read，能和auto increment pages有点关系。</para>
+            </callout>
+            
+            <callout id="co.note.clea_lp_options" arearefs="co.clea_lp_options" >
+                <para>如果有extentID且不是三星的nand flash，则清除掉上面我们默认设置的那些参数：LP_OPTIONS。</para>
+            </callout>
+            
+            <callout id="co.note.and_chip" arearefs="co.and_chip" >
+                <para>一种特殊的nand flash，AND chip。所以，也要赋值给特殊的擦除函数。</para>
+                <para>具体关于此类nand flash的介绍，感兴趣的自己参考上面drivers\mtd\nand\nand_ids.c中nand_flash_ids数组中的解释。</para>
+            </callout>
+            
+            <callout id="co.note.largepage" arearefs="co.largepage" >
+                <para>如果nand flash的页大小是大于512B，也就是2KB，4KB等新的，被称作large block或largepage的nand flash，此处的lp，应该也就是large page的缩写。</para>
+                <para>此类的nand flash比旧的，在发送地址的时候，多一个地址周期。具体参考datasheet。</para>
+            </callout>
+            
+            <callout id="co.note.printk" arearefs="co.printk" >
+                <para>终于检测完所有需要的信息了。最后打印出nand flash的相关信息。</para>
+            </callout>
+            
+            <callout id="co.note.return" arearefs="co.return" >
+                <para>活干完了，就可以return回家了，呵呵。</para>
+            </callout>
+
+        </calloutlist>
+    </programlistingco>
+
+</sect1>
+
+</chapter>
